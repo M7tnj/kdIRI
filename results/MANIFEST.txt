@@ -1,0 +1,48 @@
+# Figures
+- Fig4D_miRNA_Venn.png
+- Fig_miRNA_mRNA_corr_heatmap.png
+- HubFig_top20_Betweenness.png
+- HubFig_top20_Closeness.png
+- HubFig_top20_Degree.png
+- HubFig_top20_Eigenvector.png
+- HubFig_top30_Betweenness.png
+- HubFig_top30_Closeness.png
+- HubFig_top30_Degree.png
+- HubFig_top30_Eigenvector.png
+- WGCNA_dendro_colors.png
+- WGCNA_module_trait_heatmap.png
+- WGCNA_soft_threshold.png
+
+# Result tables (CSV)
+- DEG_filtered_logFC2_p05.csv
+- DEG_full_all_genes.csv
+- DEG_sensitivity_FDR05.csv
+- DEG_summary.csv
+- GSE58438_expr_matrix.csv
+- GSE58438_sample_metadata.csv
+- GSEA_KEGG_results.csv
+- GSEA_Reactome_results.csv
+- STRING_edge_list_hub10.csv
+- STRING_edge_list_upregulated.csv
+- STRING_mapped_upregulated.csv
+- Upregulated_DEGs_for_STRING.csv
+- Upregulated_genes_with_probes.csv
+- WGCNA_module_assignments.csv
+- WGCNA_module_trait_correlations.csv
+- WGCNA_soft_threshold_table.csv
+- gene_miRNA_prediction_table.csv
+- hub_gene_centrality_metrics.csv
+- miRNA_intersection.csv
+- miRNA_mRNA_spearman.csv
+
+# Text artifacts
+- WGCNA_hub10.txt
+- analysis_metadata.txt
+- hub_genes_10.txt
+- hub_genes_6_validated.txt
+- hub_genes_90.txt
+- python_sessionInfo.txt
+
+# Other
+- GSE58438_series_matrix.txt.gz
+- ROC_exploratory_helper.py

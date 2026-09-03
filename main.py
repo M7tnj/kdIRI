@@ -82,8 +82,8 @@ warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-RESULTS_DIR = Path("/workspaces/kdIRIresults")
-FIGURES_DIR = Path("/workspaces/kdIRIfigures")
+RESULTS_DIR = Path("/workspaces/kdIRI/results/")
+FIGURES_DIR = Path("/workspaces/kdIRI/figures/")
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
