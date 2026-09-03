@@ -1,0 +1,14 @@
+Dataset                  : GSE58438
+Platform (GEO)           : GPL11534
+Platform title           : 
+Total samples in series  : 46
+Samples used in analysis : 9 (5 Control + 4 AKI)
+GSM accessions used      : GSM1411057, GSM1411058, GSM1411059, GSM1411060, GSM1411061, GSM1411067, GSM1411068, GSM1411069, GSM1411070
+Normalization            : values from GEO Matrix are already log2-RMA-scaled
+log2-transform check     : max(exprSet)=~16, min(exprSet)=~2 (consistent with log2)
+limma model              : ~ 0 + group (no intercept, group-means parameterization)
+limma contrast           : AKI - Control
+DEG thresholds (primary) : |log2FC| > 2 and raw P.Value < 0.05 (matches paper, 8,596 DEGs)
+DEG thresholds (sens.)   : |log2FC| > 2 and BH-FDR (adj.P.Val) < 0.05
+Multiple-testing method  : Benjamini-Hochberg (BH), reported in 'adj.P.Val'
+R version                : R version 4.6.0 (2026-04-24 ucrt)

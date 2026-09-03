@@ -1,0 +1,10 @@
+Gene,miRNA,Predicted_by,Evidence_type
+BRCA1,rno-miR-103-3p,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+BRCA1,rno-miR-107-3p,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+BRCA1,rno-miR-101b-3p,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+RAD51,rno-miR-92a-2-5p,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+RAD51,rno-miR-935,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+EXO1,rno-miR-103-3p,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+MCM7,rno-miR-107-3p,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+RFC3,rno-miR-935,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
+TP53,rno-miR-103-3p,"miRDB, miRWalk, TargetScan",predicted (3-database overlap)
