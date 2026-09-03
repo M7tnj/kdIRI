@@ -1,34 +1,3 @@
-###############################################################################
-# Python continuation of the GSE58438 renal IRI pipeline
-# -----------------------------------------------------------------------------
-# This script picks up at STEP 12 of the original R pipeline (proj.R) and runs
-# the rest of the analysis in Python.
-#
-# What R (steps 1-11) produced and what Python reads from `results/`:
-#   - DEG_full_all_genes.csv          (all genes, limma stats + GeneSymbol)
-#   - DEG_filtered_logFC2_p05.csv     (8,596 DEGs)
-#   - DEG_sensitivity_FDR05.csv       (FDR-filtered DEGs)
-#   - DEG_summary.csv
-#   - Upregulated_DEGs_for_STRING.csv (clean up-regulated gene list w/ SYMBOL)
-#   - Upregulated_genes_with_probes.csv
-#   - GSE58438_sample_metadata.csv
-#   - GSEA_KEGG_results.csv           (optional)
-#   - GSEA_Reactome_results.csv       (optional)
-#
-# Steps implemented in Python (12-20):
-#   12  STRING PPI network (POST API + NetworkX + centralities + hub selection)
-#   13  Top-20 / Top-30 hub bar plots for 4 centrality metrics
-#   14  Hub-10 sub-network refinement
-#   15  miRNA target prediction Venn (template + pre-populated table)
-#   16  Spearman miRNA-mRNA correlation template
-#   17  Independent validation with GSE9943 (download + DE + overlap Venn)
-#   18  WGCNA module discovery (pure-Python implementation)
-#   19  Exploratory ROC helper
-#   20  Session info + manifest
-#
-# Author: continuation of proj.R
-###############################################################################
-
 from __future__ import annotations
 
 import io
@@ -59,12 +28,12 @@ from sklearn.metrics import roc_curve, auc
 from statsmodels.stats.multitest import multipletests
 
 import matplotlib
-matplotlib.use("Agg")  # non-interactive backend
+matplotlib.use("Agg") 
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from matplotlib_venn import venn2, venn3
 
-# Optional: register Noto Sans SC for any CJK characters that might appear
+
 try:
     fm.fontManager.addfont('/usr/share/fonts/truetype/chinese/NotoSansSC-Regular.ttf')
 except Exception:
@@ -79,30 +48,28 @@ plt.rcParams['savefig.bbox'] = 'tight'
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
 
-# -----------------------------------------------------------------------------
+
 # Configuration
-# -----------------------------------------------------------------------------
+
 RESULTS_DIR = Path("/workspaces/kdIRI/results/")
 FIGURES_DIR = Path("/workspaces/kdIRI/figures/")
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 STRING_API   = "https://string-db.org/api"
-STRING_SPECIES = 10116              # Rattus norvegicus
-STRING_SCORE   = 400                # medium confidence (STRING default)
-STRING_CHUNK   = 250                # identifiers per POST request
+STRING_SPECIES = 10116              
+STRING_SCORE   = 400               
+STRING_CHUNK   = 250                
 HUB6_VALIDATED = ["BRCA1", "RAD51", "MCM7", "EXO1", "RFC3", "TP53"]
 
 SEED = 20240901
 np.random.seed(SEED)
 
 
-# -----------------------------------------------------------------------------
 # Utility helpers
-# -----------------------------------------------------------------------------
+
 def save_fig(fig: plt.Figure, name: str, *, width_in: float = 6,
              height_in: float = 5) -> Path:
-    """Save a matplotlib figure to figures/<name> at 300 dpi."""
     path = FIGURES_DIR / name
     fig.set_size_inches(width_in, height_in)
     fig.savefig(path, dpi=300, bbox_inches='tight')
@@ -112,7 +79,6 @@ def save_fig(fig: plt.Figure, name: str, *, width_in: float = 6,
 
 
 def safe_save_df(df: pd.DataFrame, name: str) -> Path:
-    """Save a CSV to results/<name>, creating the directory if needed."""
     path = RESULTS_DIR / name
     df.to_csv(path, index=False)
     print(f"  Saved: {path}")
@@ -123,21 +89,8 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}")
 
 
-# -----------------------------------------------------------------------------
-# STEP 12 — STRING PPI network + centralities + hub selection
-# -----------------------------------------------------------------------------
-# IMPORTANT: STRING-db's live API (https://string-db.org/api) is increasingly
-# behind Cloudflare bot-protection and frequently returns HTTP 403 even with
-# a valid User-Agent. We therefore default to the official STRING bulk files
-# hosted at https://stringdb-downloads.org/ which are not behind Cloudflare.
-# The bulk files are:
-#   protein.info.v12.0/10116.protein.info.v12.0.txt.gz
-#       → maps STRING_id → preferred_name (gene symbol)
-#   protein.links.v12.0/10116.protein.links.v12.0.txt.gz
-#       → all pairwise interactions with combined_score
-#
-# In rat (taxon 10116) STRING stores gene symbols in sentence case
-# (e.g. "Brca1", "Rad51", "Tp53"), so we match case-insensitively.
+# STEP 12 STRING PPI network
+
 
 STRING_DOWNLOAD_BASE = "https://stringdb-downloads.org/download"
 STRING_VERSION = "12.0"
@@ -147,7 +100,6 @@ STRING_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def _download_with_retry(url: str, dest: Path,
                           retries: int = 3, timeout: int = 300) -> bool:
-    """Download URL to dest with retries. Returns True on success."""
     if dest.exists() and dest.stat().st_size > 0:
         return True
     for attempt in range(1, retries + 1):
@@ -168,14 +120,12 @@ def _download_with_retry(url: str, dest: Path,
 
 
 def load_string_info() -> pd.DataFrame:
-    """Download and cache the 10116.protein.info file. Returns DataFrame with
-    columns [STRING_id, GeneSymbol]."""
     url = f"{STRING_DOWNLOAD_BASE}/protein.info.v{STRING_VERSION}/10116.protein.info.v{STRING_VERSION}.txt.gz"
     dest = STRING_CACHE_DIR / f"10116.protein.info.v{STRING_VERSION}.txt.gz"
     if not _download_with_retry(url, dest):
         raise RuntimeError(f"Failed to download STRING protein.info from {url}")
     df = pd.read_csv(dest, sep="\t", dtype=str)
-    # Columns: #string_protein_id, preferred_name, protein_size, annotation
+
     sid_col = "#string_protein_id" if "#string_protein_id" in df.columns else df.columns[0]
     df = df.rename(columns={sid_col: "STRING_id",
                              "preferred_name": "GeneSymbol"})
@@ -183,8 +133,6 @@ def load_string_info() -> pd.DataFrame:
 
 
 def load_string_links() -> pd.DataFrame:
-    """Download and cache the 10116.protein.links file. Returns DataFrame with
-    columns [fromId, toId, combined_score]."""
     url = f"{STRING_DOWNLOAD_BASE}/protein.links.v{STRING_VERSION}/10116.protein.links.v{STRING_VERSION}.txt.gz"
     dest = STRING_CACHE_DIR / f"10116.protein.links.v{STRING_VERSION}.txt.gz"
     if not _download_with_retry(url, dest):
@@ -199,9 +147,6 @@ def load_string_links() -> pd.DataFrame:
 
 def map_symbols_to_string_ids(symbols: List[str],
                               info_df: pd.DataFrame) -> pd.DataFrame:
-    """Map gene symbols → STRING_ids using case-insensitive matching against
-    the protein.info file. Returns DataFrame [GeneSymbol_input, STRING_id,
-    GeneSymbol_STRING]."""
     info_lower = info_df.copy()
     info_lower["sym_lower"] = info_lower["GeneSymbol"].str.lower()
     sym_to_sid = dict(zip(info_lower["sym_lower"], info_lower["STRING_id"]))
@@ -222,8 +167,7 @@ def map_symbols_to_string_ids(symbols: List[str],
 def filter_string_edges(string_ids: List[str],
                          links_df: pd.DataFrame,
                          min_score: int = STRING_SCORE) -> pd.DataFrame:
-    """Filter the full links table to only edges where BOTH endpoints are in
-    string_ids AND combined_score >= min_score. Undirected deduplication."""
+
     id_set = set(string_ids)
     edges = links_df[
         links_df["fromId"].isin(id_set)
@@ -232,7 +176,7 @@ def filter_string_edges(string_ids: List[str],
     ].copy()
     if edges.empty:
         return edges
-    # Undirected deduplication: sort each pair so A|B and B|A become identical
+
     edges["__key"] = edges.apply(
         lambda r: "|".join(sorted([str(r["fromId"]), str(r["toId"])])),
         axis=1
@@ -243,18 +187,17 @@ def filter_string_edges(string_ids: List[str],
 
 def step12_string_ppi() -> Tuple[pd.DataFrame, pd.DataFrame, nx.Graph,
                                   List[str], List[str]]:
-    """Run step 12: STRING PPI for up-regulated genes, centralities, hubs."""
+   
     log("STEP 12 — STRING PPI network (bulk-file method)")
 
     up_csv = RESULTS_DIR / "Upregulated_DEGs_for_STRING.csv"
     if not up_csv.exists():
         raise FileNotFoundError(
             f"Required R output not found: {up_csv}\n"
-            "Run steps 1-11 of proj.R first to generate the up-regulated DEG table."
         )
 
     up_df = pd.read_csv(up_csv)
-    # The R code wrote a deg_up_anno_clean data.frame — locate the symbol column
+
     sym_col = next((c for c in ["GeneSymbol", "SYMBOL", "Gene"]
                     if c in up_df.columns), None)
     if sym_col is None:
@@ -267,38 +210,32 @@ def step12_string_ppi() -> Tuple[pd.DataFrame, pd.DataFrame, nx.Graph,
     symbols = symbols[symbols != ""].unique().tolist()
     log(f"  Up-regulated gene symbols submitted to STRING: {len(symbols)}")
 
-    # 12a. Download protein.info & protein.links
     info_df  = load_string_info()
     links_df = load_string_links()
     log(f"  STRING info:  {len(info_df):,} proteins")
     log(f"  STRING links: {len(links_df):,} interactions")
 
-    # 12b. Map symbols → STRING_ids (case-insensitive)
     mapped = map_symbols_to_string_ids(symbols, info_df)
     if mapped.empty:
         raise RuntimeError("No up-regulated gene symbols mapped to STRING ids.")
     mapped.to_csv(RESULTS_DIR / "STRING_mapped_upregulated.csv", index=False)
     log(f"  STRING mapped proteins: {len(mapped)} / {len(symbols)}")
 
-    # 12c. Filter interactions to edges among our input proteins
     string_ids = mapped["STRING_id"].astype(str).unique().tolist()
     edges_df = filter_string_edges(string_ids, links_df, STRING_SCORE)
     if edges_df.empty:
         raise RuntimeError(
             "STRING returned no edges among the input proteins. "
-            "Try lowering STRING_SCORE in the script header."
         )
     log(f"  STRING edges among input proteins (score >= {STRING_SCORE}): "
         f"{len(edges_df)}")
 
-    # Attach gene symbols to edge endpoints
     id2sym = dict(zip(mapped["STRING_id"], mapped["GeneSymbol_STRING"]))
     edges_df = edges_df.copy()
     edges_df["fromSymbol"] = edges_df["fromId"].map(id2sym)
     edges_df["toSymbol"]   = edges_df["toId"].map(id2sym)
     safe_save_df(edges_df, "STRING_edge_list_upregulated.csv")
 
-    # 12d. Build NetworkX graph (label vertices with gene symbols)
     G = nx.Graph()
     for _, r in edges_df.iterrows():
         a = r["fromSymbol"] if pd.notna(r["fromSymbol"]) else r["fromId"]
@@ -307,7 +244,6 @@ def step12_string_ppi() -> Tuple[pd.DataFrame, pd.DataFrame, nx.Graph,
     log(f"  NetworkX graph: {G.number_of_nodes()} vertices, "
         f"{G.number_of_edges()} edges")
 
-    # 12e. Centralities (4 metrics, matching R script)
     log("  Computing centralities …")
     degree_cent = dict(G.degree())
     btw_cent    = nx.betweenness_centrality(G, normalized=True)
@@ -328,24 +264,21 @@ def step12_string_ppi() -> Tuple[pd.DataFrame, pd.DataFrame, nx.Graph,
                                .reset_index(drop=True)
     safe_save_df(centralities, "hub_gene_centrality_metrics.csv")
 
-    # 12f. Hub selection
     hub90 = centralities.head(90)["Gene"].tolist()
     hub10 = centralities.head(10)["Gene"].tolist()
     (RESULTS_DIR / "hub_genes_90.txt").write_text("\n".join(hub90))
     (RESULTS_DIR / "hub_genes_10.txt").write_text("\n".join(hub10))
 
-    # 12g. Persist validated 6 hubs (from paper)
     (RESULTS_DIR / "hub_genes_6_validated.txt").write_text("\n".join(HUB6_VALIDATED))
 
     log(f"  hub90 saved ({len(hub90)} genes); hub10 saved ({len(hub10)} genes)")
     return centralities, edges_df, G, hub10, hub90
 
 
-# -----------------------------------------------------------------------------
-# STEP 13 — Hub-gene supplementary bar plots
-# -----------------------------------------------------------------------------
+
+# STEP 13 hubgene supplementary bar plots
+
 def step13_hub_bar_plots(centralities: pd.DataFrame) -> None:
-    """Top-20 AND top-30 bar plots for each of 4 centrality metrics."""
     log("STEP 13 — Hub-gene bar plots (4 metrics x top-20/30)")
 
     metric_cols = {
@@ -360,7 +293,6 @@ def step13_hub_bar_plots(centralities: pd.DataFrame) -> None:
             df = centralities.dropna(subset=[metric]) \
                              .nlargest(n, metric) \
                              .copy()
-            # bottom → top so largest is on top of horizontal bar chart
             df = df.iloc[::-1]
             df["Gene"] = pd.Categorical(df["Gene"], categories=df["Gene"], ordered=True)
 
@@ -375,16 +307,15 @@ def step13_hub_bar_plots(centralities: pd.DataFrame) -> None:
                      width_in=6, height_in=max(4, n * 0.25))
 
 
-# -----------------------------------------------------------------------------
-# STEP 14 — Hub-of-hub refinement: STRING sub-network of the 10 hub genes
-# -----------------------------------------------------------------------------
+
+# 14| HUB OF HUB refinement
+
 def step14_hub10_subnetwork(hub10: List[str]) -> None:
     log("STEP 14 — Hub-10 sub-network refinement")
     if not hub10:
         log("  hub10 is empty — skipping.")
         return
-
-    # Reuse the cached STRING info + links files
+    
     info_df  = load_string_info()
     links_df = load_string_links()
     mapped   = map_symbols_to_string_ids(hub10, info_df)
@@ -405,19 +336,14 @@ def step14_hub10_subnetwork(hub10: List[str]) -> None:
     log(f"  Hub-10 sub-network edges: {len(edges)}")
 
 
-# -----------------------------------------------------------------------------
-# STEP 15 — miRNA target-prediction Venn (template + pre-populated table)
-# -----------------------------------------------------------------------------
+
+# 15| miRNA target prediction Venn
+
 def predict_venn(mirdb_file: Optional[str] = None,
                  mirwalk_file: Optional[str] = None,
                  targetscan_file: Optional[str] = None,
                  out_csv: str = "miRNA_intersection.csv",
                  out_png: str = "Fig4D_miRNA_Venn.png") -> List[str]:
-    """Build a 3-way Venn diagram from miRDB / miRWalk / TargetScan CSV exports.
-
-    Each input CSV must contain a 'miRNA' column. Missing inputs are treated
-    as empty sets and the diagram degrades to a 2-way / 1-way Venn.
-    """
     log("STEP 15 — miRNA target-prediction Venn (template)")
 
     def _load(p: Optional[str]) -> List[str]:
@@ -459,7 +385,6 @@ def predict_venn(mirdb_file: Optional[str] = None,
 
 
 def reduce_intersect(lists: List[List[str]]) -> List[str]:
-    """Iterative pairwise intersection."""
     if not lists:
         return []
     out = set(lists[0])
@@ -469,7 +394,6 @@ def reduce_intersect(lists: List[List[str]]) -> List[str]:
 
 
 def step15_mirna_table() -> None:
-    """Persist the pre-populated gene ↔ miRNA mapping from the paper."""
     table = pd.DataFrame({
         "Gene": ["BRCA1", "BRCA1", "BRCA1",
                  "RAD51", "RAD51",
@@ -489,20 +413,12 @@ def step15_mirna_table() -> None:
     safe_save_df(table, "gene_miRNA_prediction_table.csv")
 
 
-# -----------------------------------------------------------------------------
-# STEP 16 — Spearman miRNA-mRNA correlation template
-# -----------------------------------------------------------------------------
+# STEP 16| Spearman miRNA-mRNA correlation template
 def run_mirna_mrna_spearman(ct_df: pd.DataFrame,
                             gene_cols: List[str],
                             mirna_cols: List[str],
                             out_csv: str = "miRNA_mRNA_spearman.csv",
                             out_png: str = "Fig_miRNA_mRNA_corr_heatmap.png") -> pd.DataFrame:
-    """Compute Spearman ρ for every gene × miRNA pair, FDR-adjust, and draw a heatmap.
-
-    `ct_df` is a long-format data frame (one row per sample) with columns
-    for each gene (ΔCt) and each miRNA (ΔCt). Lower ΔCt = higher expression,
-    so we typically expect negative ρ for true mRNA-miRNA repression.
-    """
     log("STEP 16 — Spearman miRNA-mRNA correlation (template)")
 
     missing = [c for c in gene_cols + mirna_cols if c not in ct_df.columns]
@@ -520,7 +436,6 @@ def run_mirna_mrna_spearman(ct_df: pd.DataFrame,
                                        method="fdr_bh")[1]
     safe_save_df(res, out_csv)
 
-    # Heatmap of rho
     wide = res.pivot(index="Gene", columns="miRNA", values="rho")
     fig, ax = plt.subplots()
     im = ax.imshow(wide.values, aspect="auto",
@@ -536,11 +451,8 @@ def run_mirna_mrna_spearman(ct_df: pd.DataFrame,
     return res
 
 
-# -----------------------------------------------------------------------------
-# STEP 17 — Independent validation: GSE9943 (Reviewer 1 Q1)
-# -----------------------------------------------------------------------------
+# STEP 17: Independent validation GSE9943 (Reviewer 1 Q1)
 def download_geo_series_matrix(gse: str, dest: Path) -> Optional[Path]:
-    """Download a GEO series-matrix .txt.gz file to dest."""
     base = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{gse[:-3]}nnn/{gse}/matrix/"
     url = base + f"{gse}_series_matrix.txt.gz"
     log(f"  Downloading {url}")
@@ -557,13 +469,7 @@ def download_geo_series_matrix(gse: str, dest: Path) -> Optional[Path]:
 
 
 def parse_geo_series_matrix(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, str]:
-    """Parse a GEO series-matrix .txt(.gz) file.
 
-    Returns:
-        expr_df   : genes × samples (float)
-        pheno_df  : sample metadata (one row per sample)
-        platform  : GPL accession
-    """
     opener = gzip.open if path.suffix == ".gz" else open
     sample_cols, expr_rows, platform = [], [], ""
     series_matrix_start = False
@@ -574,7 +480,6 @@ def parse_geo_series_matrix(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, str
             line = line.rstrip("\n")
             if line.startswith("!Series_platform_id"):
                 platform = line.split("\t", 1)[-1].strip('"').split("-")[0]
-                # keep full GPL id too
                 platform = line.split("\t", 1)[-1].strip('"')
             elif line.startswith("!Sample_"):
                 pheno_lines.append(line)
@@ -594,7 +499,6 @@ def parse_geo_series_matrix(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, str
     if not expr_rows:
         raise ValueError(f"No expression matrix found in {path}")
 
-    # Build expression DataFrame
     ids = [r[0].strip('"') for r in expr_rows]
     values = np.array(
         [[float(v) if v not in ("", "NA", "null") else np.nan
@@ -603,7 +507,6 @@ def parse_geo_series_matrix(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, str
     )
     expr_df = pd.DataFrame(values, index=ids, columns=sample_cols)
 
-    # Parse phenotype
     pheno_records: Dict[str, Dict[str, str]] = {}
     for line in pheno_lines:
         key, *vals = line.split("\t")
@@ -618,16 +521,8 @@ def parse_geo_series_matrix(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, str
 
 
 def simple_limma(expr: pd.DataFrame, groups: List[str]) -> pd.DataFrame:
-    """A simplified limma-like DE analysis using Welch's t-test + BH-FDR.
-
-    expr : genes × samples DataFrame
-    groups : length = n_samples; control vs case labels
-
-    Returns a DataFrame indexed by gene with columns:
-    logFC, t, P.Value, adj.P.Val, AveExpr
-    """
     groups = pd.Series(groups, index=expr.columns)
-    levels = list(dict.fromkeys(groups))  # preserve first-occurrence order
+    levels = list(dict.fromkeys(groups))
     if len(levels) < 2:
         raise ValueError("Need at least 2 group levels for DE analysis")
 
@@ -649,12 +544,10 @@ def simple_limma(expr: pd.DataFrame, groups: List[str]) -> pd.DataFrame:
             log_fc = mean_case - mean_ctrl
             var_ctrl = np.nanvar(e_ctrl, axis=1, ddof=1)
             var_case = np.nanvar(e_case, axis=1, ddof=1)
-    # Welch's t-statistic
     se = np.sqrt(var_ctrl / n_ctrl + var_case / n_case)
     se = np.where(se == 0, np.nan, se)
     t_stat = log_fc / se
 
-    # Welch-Satterthwaite df
     num = (var_ctrl / n_ctrl + var_case / n_case) ** 2
     den = ((var_ctrl / n_ctrl) ** 2 / max(n_ctrl - 1, 1)
            + (var_case / n_case) ** 2 / max(n_case - 1, 1))
@@ -677,14 +570,6 @@ def simple_limma(expr: pd.DataFrame, groups: List[str]) -> pd.DataFrame:
 
 
 def auto_extract_groups_gse9943(pheno: pd.DataFrame) -> List[str]:
-    """Try to detect Control/IRI labels from GSE9943 phenotype columns.
-
-    GSE9943 uses 'Control' vs 'I/R' in Sample_title / Sample_source_name_ch1.
-    We also accept 'Sham' / 'IRI' / 'ischemia' / 'i/r' for other series.
-    Returns a list of group labels (one per sample) with 'Control' first
-    and 'IRI' second so simple_limma's contrast is IRI - Control.
-    """
-    # Candidate phenotype columns likely to contain group labels
     cand_cols = [c for c in pheno.columns
                  if c in ("Sample_title", "Sample_source_name_ch1",
                           "Sample_characteristics_ch1",
@@ -697,16 +582,13 @@ def auto_extract_groups_gse9943(pheno: pd.DataFrame) -> List[str]:
 
     for col in cand_cols:
         vals = pheno[col].astype(str).str.lower()
-        # control samples: contains 'control' or 'sham'
         is_ctrl = vals.str.contains(r"control|sham", regex=True, na=False)
-        # case samples: contains 'i/r', 'iri', 'ischemia', or 'aki'
         is_case = vals.str.contains(r"i/r|iri|ischemia|aki|reperfusion",
                                      regex=True, na=False)
         if is_ctrl.any() and is_case.any() and not (is_ctrl & is_case).any():
             return ["Control" if c else "IRI"
                     for c in is_ctrl.tolist()]
 
-    # Fallback: split samples in half (left half = Control, right half = IRI)
     n = len(pheno)
     log(f"  Could not auto-detect groups; splitting {n} samples in half "
         f"(verify manually).")
@@ -715,8 +597,6 @@ def auto_extract_groups_gse9943(pheno: pd.DataFrame) -> List[str]:
 
 def step17_gse9943_validation() -> None:
     log("STEP 17 — GSE9943 independent validation")
-
-    # Load discovery DEGs (from R output)
     disc_csv = RESULTS_DIR / "DEG_full_all_genes.csv"
     if not disc_csv.exists():
         log(f"  {disc_csv} not found — skipping validation.")
@@ -730,7 +610,6 @@ def step17_gse9943_validation() -> None:
     disc_syms = disc_syms[disc_syms != ""].unique().tolist()
     log(f"  Discovery gene symbols: {len(disc_syms)}")
 
-    # Download GSE9943
     gse_id = "GSE9943"
     dest = RESULTS_DIR / f"{gse_id}_series_matrix.txt.gz"
     if not dest.exists():
@@ -746,28 +625,22 @@ def step17_gse9943_validation() -> None:
     groups_val = auto_extract_groups_gse9943(pheno_val)
     log(f"  GSE9943 groups: {dict(pd.Series(groups_val).value_counts())}")
 
-    # Run DE
     deg_val = simple_limma(expr_val, groups_val)
     deg_val_filt = deg_val[(deg_val["logFC"].abs() > 2)
                            & (deg_val["P.Value"] < 0.05)].copy()
     safe_save_df(deg_val.reset_index(),       "GSE9943_DEG_full.csv")
     safe_save_df(deg_val_filt.reset_index(), "GSE9943_DEG_filtered.csv")
 
-    # Map probes to gene symbols — try the platform annotation columns in pheno
     sym_col = None
     for c in pheno_val.columns:
         if c.lower().startswith("sample_gene_platform") or "symbol" in c.lower():
             sym_col = c
             break
 
-    # Use platform-specific annotation file if available in series matrix
     val_syms: List[str] = []
     if "GeneSymbol" in deg_val_filt.columns:
         val_syms = deg_val_filt["GeneSymbol"].dropna().astype(str).unique().tolist()
     if not val_syms:
-        # Try fData-like columns: any column in pheno that contains gene symbols
-        # per-probe. The series matrix typically doesn't carry probe→symbol.
-        # As a fallback we try the GPL platform annotation.
         log("  No probe→symbol mapping in series matrix — "
             "attempting GPL annotation download.")
         val_syms = _try_map_via_gpl(deg_val_filt.index.tolist(), platform)
@@ -781,7 +654,6 @@ def step17_gse9943_validation() -> None:
     safe_save_df(pd.DataFrame({"Validated_gene": common}),
                  "GSE58438_vs_GSE9943_overlap_genes.csv")
 
-    # Venn diagram
     fig, ax = plt.subplots()
     venn2(subsets=(len(set(disc_syms) - set(val_syms)),
                    len(set(val_syms) - set(disc_syms)),
@@ -794,13 +666,9 @@ def step17_gse9943_validation() -> None:
 
 
 def _try_map_via_gpl(probe_ids: List[str], platform: str) -> List[str]:
-    """Best-effort: download GPL platform annotation and map probes → SYMBOL."""
     if not platform or not platform.startswith("GPL"):
         return []
     gpl_num = platform[3:]
-    # GEO annotation files follow two naming conventions:
-    #   older: GPL{N}_annot.txt.gz
-    #   newer: GPL{N}.annot.gz
     base = (f"https://ftp.ncbi.nlm.nih.gov/geo/platforms/"
             f"GPL{int(gpl_num)//1000}nnn/{platform}/annot/")
     urls = [base + f"{platform}.annot.gz",
@@ -826,11 +694,6 @@ def _try_map_via_gpl(probe_ids: List[str], platform: str) -> List[str]:
         if not ok:
             return []
 
-    # Parse the .annot.gz file:
-    # - Lines starting with '^' or '!' are metadata
-    # - After '!platform_table_begin' there is a tab-separated header line
-    #   followed by data rows
-    # - The 'Gene symbol' column contains the gene symbol (or '---' if missing)
     try:
         with gzip.open(dest, "rt", errors="ignore") as fh:
             lines = fh.readlines()
@@ -840,7 +703,6 @@ def _try_map_via_gpl(probe_ids: List[str], platform: str) -> List[str]:
                 header_idx = i + 1
                 break
         if header_idx is None:
-            # Try first line starting with "ID\t"
             for i, ln in enumerate(lines):
                 if ln.startswith("ID\t"):
                     header_idx = i
@@ -860,7 +722,6 @@ def _try_map_via_gpl(probe_ids: List[str], platform: str) -> List[str]:
                            None)
         if sym_col is None:
             return []
-        # Replace '---' with NaN
         annot[sym_col] = annot[sym_col].replace({"---": np.nan, "": np.nan})
         mapping = dict(zip(annot["ID"].astype(str),
                            annot[sym_col].astype(str)))
@@ -872,26 +733,13 @@ def _try_map_via_gpl(probe_ids: List[str], platform: str) -> List[str]:
         log(f"  GPL annotation parse failed: {e}")
         return []
 
-
-# -----------------------------------------------------------------------------
-# STEP 18 — WGCNA module discovery (pure-Python implementation)
-# -----------------------------------------------------------------------------
+# STEP 18 WGCNA
 def load_expression_matrix() -> Tuple[pd.DataFrame, pd.Series]:
-    """Load the GSE58438 expression matrix (samples × genes) and group vector.
 
-    Order of preference:
-      1. results/GSE58438_expr_matrix.csv  (if user saved it from R)
-      2. Re-download GSE58438 series matrix from GEO
-    Returns:
-        datExpr : samples × genes (already filtered to good genes)
-        trait   : 0/1 series (Control=0, AKI=1)
-    """
     saved = RESULTS_DIR / "GSE58438_expr_matrix.csv"
     if saved.exists():
         log(f"  Reading saved expression matrix from {saved}")
         expr = pd.read_csv(saved, index_col=0)
-        # We want samples × genes. If sample IDs are in the COLUMNS
-        # (i.e. matrix was saved as genes × samples), transpose it.
         sample_marker = "GSM1411057"
         if sample_marker in expr.columns:
             expr = expr.T
@@ -906,11 +754,9 @@ def load_expression_matrix() -> Tuple[pd.DataFrame, pd.Series]:
             if ok is None:
                 raise RuntimeError("GSE58438 download failed; cannot run WGCNA.")
         expr, pheno, _ = parse_geo_series_matrix(dest)
-        expr = expr.T  # samples × genes
-        # Persist for future runs
+        expr = expr.T 
         expr.to_csv(saved)
 
-    # The 9 samples used in the paper
     samples = ["GSM1411057", "GSM1411058", "GSM1411059", "GSM1411060",
                "GSM1411061", "GSM1411067", "GSM1411068", "GSM1411069",
                "GSM1411070"]
@@ -925,11 +771,10 @@ def load_expression_matrix() -> Tuple[pd.DataFrame, pd.Series]:
 
 def good_samples_genes(datExpr: pd.DataFrame, frac_thresh: float = 0.95
                        ) -> pd.DataFrame:
-    """Filter genes with too many NAs; impute remaining NAs with column mean."""
     gfrac = datExpr.notna().mean(axis=0)
     good_genes = gfrac[gfrac >= frac_thresh].index
     datExpr = datExpr[good_genes].copy()
-    # Fill remaining NAs with column mean
+
     means = datExpr.mean(axis=0, skipna=True)
     datExpr = datExpr.fillna(means)
     return datExpr
@@ -938,15 +783,12 @@ def good_samples_genes(datExpr: pd.DataFrame, frac_thresh: float = 0.95
 def pick_soft_threshold(datExpr: pd.DataFrame,
                         powers: Iterable[int] = range(1, 21)
                         ) -> pd.DataFrame:
-    """Replicate WGCNA::pickSoftThreshold — for each power compute
-       scale-free topology fit R² and mean connectivity."""
-    A = datExpr.corr().abs().values  # |Pearson correlation|
+    A = datExpr.corr().abs().values
     np.fill_diagonal(A, 0)
     records = []
     for p in powers:
         adj = A ** p
-        k = adj.sum(axis=1)  # connectivity per gene
-        # Bin k to estimate frequency distribution
+        k = adj.sum(axis=1) 
         hist, edges = np.histogram(k, bins=30)
         centers = (edges[:-1] + edges[1:]) / 2
         nonzero = hist > 0
@@ -967,10 +809,9 @@ def pick_soft_threshold(datExpr: pd.DataFrame,
 
 
 def build_tom(adj: np.ndarray) -> np.ndarray:
-    """Topological Overlap Matrix (unsigned)."""
     n = adj.shape[0]
-    k = adj.sum(axis=1)  # node connectivity (excluding self-loops)
-    L = adj @ adj  # sum over u of a_iu * a_uj
+    k = adj.sum(axis=1) 
+    L = adj @ adj  
     np.fill_diagonal(L, 0)
     min_k = np.minimum.outer(k, k)
     denom = min_k + 1 - adj
@@ -982,7 +823,6 @@ def build_tom(adj: np.ndarray) -> np.ndarray:
 def blockwise_modules(datExpr: pd.DataFrame, power: int = 6,
                       min_module_size: int = 30,
                       merge_cut_height: float = 0.25) -> Tuple[np.ndarray, pd.DataFrame]:
-    """Pure-Python blockwiseModules (single block, unsigned)."""
     log(f"  Building adjacency with power={power} …")
     A = datExpr.corr().abs().values ** power
     np.fill_diagonal(A, 0)
@@ -991,7 +831,7 @@ def blockwise_modules(datExpr: pd.DataFrame, power: int = 6,
     tom = build_tom(A)
     diss_tom = 1.0 - tom
     np.fill_diagonal(diss_tom, 0.0)
-    # Ensure symmetry / non-negative
+
     diss_tom = (diss_tom + diss_tom.T) / 2
     diss_tom = np.clip(diss_tom, 0.0, 1.0)
 
@@ -999,11 +839,6 @@ def blockwise_modules(datExpr: pd.DataFrame, power: int = 6,
     condensed = squareform(diss_tom, checks=False)
     Z = linkage(condensed, method="average")
 
-    # WGCNA's dynamic tree cut is hard to replicate in scipy. We approximate
-    # by scanning cut heights from deepest (most clusters) to shallowest
-    # (fewest clusters) and picking the one that yields 3-15 non-grey modules
-    # after applying min_module_size. If none qualifies, we force a maxclust
-    # cut with k=8.
     def _filter_small(labels_arr: np.ndarray) -> np.ndarray:
         out = labels_arr.copy()
         for lab in set(out):
@@ -1027,25 +862,20 @@ def blockwise_modules(datExpr: pd.DataFrame, power: int = 6,
         initial_labels = best_cut[1]
         log(f"  Using cut t={best_cut[0]}")
     else:
-        # Force a fixed number of clusters
         initial_labels = fcluster(Z, t=8, criterion="maxclust")
         log("  No cut height gave 3-15 modules — forcing maxclust k=8")
 
-    # Map labels → contiguous 0..K; 0 reserved for "grey" (unassigned)
     unique_labels = sorted(set(initial_labels))
     relabel = {lab: i + 1 for i, lab in enumerate(unique_labels)}
     labels = np.array([relabel[lab] for lab in initial_labels])
 
-    # Drop small modules into "grey" (0)
     labels = _filter_small(labels)
-
-    # Compute module eigengenes (1st PC) for non-grey modules
     def _module_eigengene(gene_indices: np.ndarray) -> np.ndarray:
         sub = datExpr.iloc[:, gene_indices].values
         sub = StandardScaler().fit_transform(sub)
         pca = PCA(n_components=1, random_state=SEED)
         me = pca.fit_transform(sub).ravel()
-        # Sign convention: positive correlation with mean expression
+
         if np.corrcoef(me, sub.mean(axis=1))[0, 1] < 0:
             me = -me
         return me
@@ -1060,12 +890,10 @@ def blockwise_modules(datExpr: pd.DataFrame, power: int = 6,
         MEs[f"ME{m}"] = _module_eigengene(idx)
     MEs_df = pd.DataFrame(MEs, index=datExpr.index)
 
-    # Merge close modules (1 - |cor(ME_i, ME_j)| < merge_cut_height)
     if MEs_df.shape[1] > 1:
         me_corr = MEs_df.corr().abs().values
         np.fill_diagonal(me_corr, 0)
         merge = (1 - me_corr) < merge_cut_height
-        # Union-find for transitive merging
         parent = list(range(len(MEs_df.columns)))
 
         def _find(x: int) -> int:
@@ -1084,24 +912,20 @@ def blockwise_modules(datExpr: pd.DataFrame, power: int = 6,
                 if merge[i, j]:
                     _union(i, j)
 
-        # Apply merging — relabel each module to its root
         col_to_root = {i: _find(i) for i in range(len(MEs_df.columns))}
         root_me_cols: Dict[int, List[int]] = {}
         for col_idx, root in col_to_root.items():
             root_me_cols.setdefault(root, []).append(col_idx)
 
         new_labels = labels.copy()
-        # Build a new MEs DataFrame with merged eigengenes
         merged_mes: Dict[str, np.ndarray] = {}
         for root, members in root_me_cols.items():
             m_root_id = int(MEs_df.columns[root].replace("ME", ""))
-            # Assign all members to the root module id
+
             for j in members:
                 m_j = int(MEs_df.columns[j].replace("ME", ""))
                 new_labels[labels == m_j] = m_root_id
-            # ME for the merged module = mean of member MEs (WGCNA does this
-            # with singular value decomposition, but mean is a robust fallback
-            # when the modules are highly correlated already)
+
             merged_mes[f"ME{m_root_id}"] = MEs_df.iloc[:, members].mean(axis=1).values
         labels = new_labels
         MEs_df = pd.DataFrame(merged_mes, index=datExpr.index)
@@ -1110,7 +934,6 @@ def blockwise_modules(datExpr: pd.DataFrame, power: int = 6,
 
 
 def wgcna_module_colors(labels: np.ndarray) -> List[str]:
-    """Map module ids → WGCNA-style color names (grey = 0)."""
     import matplotlib.colors as mcolors
     standard = ["grey", "turquoise", "blue", "brown", "yellow", "green",
                 "red", "black", "pink", "magenta", "purple", "greenyellow",
@@ -1134,23 +957,19 @@ def step18_wgcna() -> None:
     datExpr = good_samples_genes(datExpr_full)
     log(f"  After goodSamplesGenes filter: {datExpr.shape}")
 
-    # For Python performance, restrict to the 5,000 most variable genes
-    # (WGCNA standard practice for large arrays; preserves module structure).
     if datExpr.shape[1] > 5000:
         variances = datExpr.var(axis=0, skipna=True)
         top_vars = variances.nlargest(5000).index
         datExpr = datExpr[top_vars]
         log(f"  Restricted to top 5,000 variable genes for performance.")
-    # Drop genes with zero variance (would break corr)
+
     variances = datExpr.var(axis=0, skipna=True)
     datExpr = datExpr.loc[:, variances > 1e-8]
 
-    # --- pickSoftThreshold ---
     log("  pickSoftThreshold …")
     sft = pick_soft_threshold(datExpr, powers=range(1, 21))
     safe_save_df(sft, "WGCNA_soft_threshold_table.csv")
 
-    # Plot soft-threshold diagnostics
     fig, (ax1, ax2) = plt.subplots(1, 2)
     ax1.scatter(sft["power"], sft["SFT.R.sq"], color="red")
     for _, r in sft.iterrows():
@@ -1165,12 +984,10 @@ def step18_wgcna() -> None:
     ax2.set_title("Mean connectivity decay")
     save_fig(fig, "WGCNA_soft_threshold.png", width_in=10, height_in=4)
 
-    # Choose power: first power reaching R² > 0.85; fallback to 6
     candidates = sft[sft["SFT.R.sq"] > 0.85]
     chosen_power = int(candidates["power"].iloc[0]) if not candidates.empty else 6
     log(f"  Chosen power = {chosen_power}")
 
-    # --- blockwiseModules ---
     labels, MEs = blockwise_modules(datExpr, power=chosen_power,
                                      min_module_size=30,
                                      merge_cut_height=0.25)
@@ -1180,8 +997,6 @@ def step18_wgcna() -> None:
                                 "ModuleColor": colors}),
                  "WGCNA_module_assignments.csv")
 
-    # Dendrogram with module colors (truncate to last 50 merges for readability
-    # — drawing 5,000 leaves would be unreadable and can crash scipy's recursion)
     if not datExpr.empty:
         A = datExpr.corr().abs().values ** chosen_power
         np.fill_diagonal(A, 0)
@@ -1198,7 +1013,6 @@ def step18_wgcna() -> None:
         ax.set_title("WGCNA dendrogram (last 50 merges) with module colors")
         save_fig(fig, "WGCNA_dendro_colors.png", width_in=10, height_in=6)
 
-    # Module-trait relationships (correlation of MEs with binary trait)
     if not MEs.empty:
         n = len(datExpr)
         rows = []
@@ -1210,7 +1024,6 @@ def step18_wgcna() -> None:
                                            method="fdr_bh")[1]
         safe_save_df(mtr, "WGCNA_module_trait_correlations.csv")
 
-        # Heatmap of module-trait correlations
         fig, ax = plt.subplots(figsize=(3, max(4, 0.4 * len(MEs.columns))))
         cmap = plt.cm.RdBu_r
         im = ax.imshow(mtr[["cor"]].values.reshape(-1, 1),
@@ -1226,7 +1039,6 @@ def step18_wgcna() -> None:
         save_fig(fig, "WGCNA_module_trait_heatmap.png", width_in=3.5,
                  height_in=max(4, 0.5 * len(MEs.columns) + 1))
 
-        # Hub genes within the turquoise module (largest non-grey)
         sizes = pd.Series(labels).value_counts()
         sizes = sizes[sizes.index != 0]
         if not sizes.empty:
@@ -1246,20 +1058,11 @@ def step18_wgcna() -> None:
                     f"{', '.join(hub10_wgcna[:5])} …")
 
 
-# -----------------------------------------------------------------------------
-# STEP 19 — Exploratory ROC helper
-# -----------------------------------------------------------------------------
+# 19 Exploratory ROC helper
 def exploratory_roc(df: pd.DataFrame, marker: str,
                     group_col: str = "group",
                     group_levels: Tuple[str, str] = ("Sham", "IRI")
                     ) -> pd.DataFrame:
-    """Compute exploratory ROC statistics for one marker.
-
-    NOTE (Reviewer 2 Q5): ROC analyses here are *exploratory*.
-    Computed on the in-house cohort used for qPCR validation; no independent
-    validation cohort. Results must NOT be interpreted as established clinical
-    diagnostic performance.
-    """
     df = df.copy()
     df["group_bin"] = df[group_col].map({group_levels[0]: 0,
                                           group_levels[1]: 1})
@@ -1270,7 +1073,6 @@ def exploratory_roc(df: pd.DataFrame, marker: str,
     fpr, tpr, thr = roc_curve(sub["group_bin"], sub[marker])
     auc_val = auc(fpr, tpr)
 
-    # Best cutoff: Youden's J
     j = tpr - fpr
     best_idx = int(np.argmax(j))
     best_thr = thr[best_idx]
@@ -1278,7 +1080,6 @@ def exploratory_roc(df: pd.DataFrame, marker: str,
     best_spec = 1 - fpr[best_idx]
     lr_pos = best_sens / max(1 - best_spec, 1e-6)
 
-    # DeLong-style CI not implemented; bootstrap 95% CI instead
     rng = np.random.default_rng(SEED)
     boot_aucs = []
     for _ in range(1000):
@@ -1296,7 +1097,6 @@ def exploratory_roc(df: pd.DataFrame, marker: str,
     else:
         ci_low = ci_high = np.nan
 
-    # Mann-Whitney U p-value (asymptotic) — equivalent to ROC test
     cases = sub.loc[sub["group_bin"] == 1, marker]
     ctrls = sub.loc[sub["group_bin"] == 0, marker]
     try:
@@ -1319,10 +1119,7 @@ def exploratory_roc(df: pd.DataFrame, marker: str,
 
 
 def step19_roc_template() -> None:
-    """Persist the exploratory ROC helper as a module-level template."""
     log("STEP 19 — Exploratory ROC helper (template; no data)")
-    # Write the function source as a documentation artifact so reviewers
-    # can see the exact computation performed.
     src = (
         "def exploratory_roc(df, marker, group_col='group',\n"
         "                    group_levels=('Sham','IRI')):\n"
@@ -1336,9 +1133,7 @@ def step19_roc_template() -> None:
     log("  Template saved to results/ROC_exploratory_helper.py")
 
 
-# -----------------------------------------------------------------------------
-# STEP 20 — Session info + manifest
-# -----------------------------------------------------------------------------
+# 20 Session info
 def step20_session_info() -> None:
     log("STEP 20 — Session info + manifest")
     info = {
@@ -1374,30 +1169,19 @@ def step20_session_info() -> None:
     log("  Pipeline finished.")
 
 
-# -----------------------------------------------------------------------------
-# Main pipeline
-# -----------------------------------------------------------------------------
+# Main
 def main() -> None:
     print("=" * 78)
     print(" GSE58438 Renal IRI pipeline — Python continuation (steps 12–20)")
     print("=" * 78)
 
-    # Step 12
     centralities, edges_df, G, hub10, hub90 = step12_string_ppi()
-
-    # Step 13
     step13_hub_bar_plots(centralities)
 
-    # Step 14
     step14_hub10_subnetwork(hub10)
-
-    # Step 15
     step15_mirna_table()
-    predict_venn()  # template run (no input CSVs → empty Venn diagram)
-
-    # Step 16 — template; no qPCR data, so we just register the function
+    predict_venn()
     log("STEP 16 — Spearman template (no qPCR data; function defined)")
-    # Demonstrate with synthetic data so the code path is exercised.
     rng = np.random.default_rng(SEED)
     demo_ct = pd.DataFrame({
         "BRCA1": rng.normal(0, 1, 12),
@@ -1408,17 +1192,9 @@ def main() -> None:
     run_mirna_mrna_spearman(demo_ct,
                             gene_cols=["BRCA1", "RAD51"],
                             mirna_cols=["rno-miR-103-3p", "rno-miR-107-3p"])
-
-    # Step 17
     step17_gse9943_validation()
-
-    # Step 18
     step18_wgcna()
-
-    # Step 19
     step19_roc_template()
-
-    # Step 20
     step20_session_info()
 
     print("\n=== Python pipeline (steps 12-20) finished ===")
