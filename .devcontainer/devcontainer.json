@@ -1,0 +1,35 @@
+{
+  "name": "RStudio Codespace",
+
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/home/rstudio/project,type=bind,consistency=consistent",
+    "source=rstudio-library,target=/usr/local/lib/R/site-library,type=volume"
+  ],
+
+  "postCreateCommand": "sudo chown -R rstudio:rstudio /home/rstudio/project && sudo chown -R rstudio:rstudio /home/rstudio/.config/rstudio && sudo chown -R rstudio:rstudio /home/rstudio/.Rprofile && sudo chmod a+rx /workspaces && ln -sf /workspaces /home/rstudio/workspaces && for repo in /workspaces/*/; do ln -sf \"$repo\" \"/home/rstudio/$(basename $repo)\" 2>/dev/null || true; done && ([ ! -f /home/rstudio/.config/rstudio/rstudio-prefs.json ] && cp /home/rstudio/project/core/rstudio-settings/rstudio-prefs.json /home/rstudio/.config/rstudio/ || true) && ([ -d /home/rstudio/project/core/rstudio-settings/themes ] && cp -n /home/rstudio/project/core/rstudio-settings/themes/* /home/rstudio/.config/rstudio/themes/ || true)",
+
+  "containerEnv": {
+    "DISABLE_AUTH": "true"
+  },
+
+  "forwardPorts": [8787],
+
+  "portsAttributes": {
+    "8787": {
+      "label": "RStudio Server",
+      "onAutoForward": "openPreview"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["REditorSupport.r"]
+    }
+  },
+
+  "remoteUser": "rstudio"
+}
