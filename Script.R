@@ -91,7 +91,7 @@ set.seed(20240901)
 
 
 
-# 1. Download GSE58438 (Reviewer 2 Q1: explicit platform / sample reporting)
+# Download GSE58438 (Reviewer 2 Q1: explicit platform / sample reporting)
 gse_id <- "GSE58438"
 
 # caching: getGEO() downloads to tempdir(); set destdir = for persistence.
@@ -135,7 +135,7 @@ writeLines(meta_log, file.path(results_dir, "analysis_metadata.txt"))
 cat(meta_log, sep = "\n")
 
 
-## 2. Subsetting
+## Subsetting
 
 samples <- c("GSM1411057","GSM1411058","GSM1411059","GSM1411060","GSM1411061",
              "GSM1411067","GSM1411068","GSM1411069","GSM1411070")
@@ -151,9 +151,6 @@ eset <- eset[, samples]
 
 # Expression matrix
 exprSet <- Biobase::exprs(eset)
-
-# Reviewer 2 Q1: verify log2 scale. RMA-processed Affymetrix ST arrays
-# from GEO are already log2-transformed; we sanity-check here.
 log2_check <- list(
   min_value      = round(min(exprSet, na.rm = TRUE), 3),
   max_value      = round(max(exprSet, na.rm = TRUE), 3),
@@ -162,7 +159,7 @@ log2_check <- list(
 )
 print(log2_check)
 
-## 3. Differential expression with limma Reviewer 2 Q1: explicit model + FDR
+## Differential expression with limma Reviewer 2 Q1: explicit model + FDR
 group  <- factor(c(rep("Control", 5), rep("AKI", 4)),
                  levels = c("Control", "AKI"))
 design <- model.matrix(~ 0 + group)
@@ -184,17 +181,16 @@ deg_filtered <- deg[abs(deg$logFC) > 2 & deg$P.Value < 0.05, ]
 # Sensitivity analysis filter: |logFC|>2 & BH-FDR<0.05 
 deg_fdr <- deg[abs(deg$logFC) > 2 & deg$adj.P.Val < 0.05, ]
 
-# Reviewer 2 Minor 7: data availability
-write.csv(deg,          file.path(results_dir, "DEG_full_all_genes.csv"),
+write.csv(deg,          file.path(results_dir, "DEG full all genes.csv"),
           row.names = FALSE)
-write.csv(deg_filtered, file.path(results_dir, "DEG_filtered_logFC2_p05.csv"),
+write.csv(deg_filtered, file.path(results_dir, "DEG filtered logFC.csv"),
           row.names = FALSE)
-write.csv(deg_fdr,      file.path(results_dir, "DEG_sensitivity_FDR05.csv"),
+write.csv(deg_fdr,      file.path(results_dir, "DEG sensitivity.csv"),
           row.names = FALSE)
 
-# Reviewer 2 Q1 summary table 
+# summary table 
 deg_summary <- data.frame(
-  Filter = c("|logFC|>2 & P<0.05  (paper, primary)",
+  Filter = c("|logFC|>2 & P<0.05",
              "|logFC|>2 & BH-FDR<0.05  (sensitivity)"),
   Total_DEGs      = c(nrow(deg_filtered), nrow(deg_fdr)),
   Upregulated     = c(sum(deg_filtered$logFC > 0),
@@ -202,7 +198,7 @@ deg_summary <- data.frame(
   Downregulated   = c(sum(deg_filtered$logFC < 0),
                       sum(deg_fdr$logFC < 0))
 )
-write.csv(deg_summary, file.path(results_dir, "DEG_summary.csv"),
+write.csv(deg_summary, file.path(results_dir, "DEG summary.csv"),
           row.names = FALSE)
 print(deg_summary)
 
@@ -215,14 +211,17 @@ annotation_col <- data.frame(Group = group, row.names = colnames(exprSet))
 
 plot_genes <- intersect(rownames(deg_filtered), rownames(exprSet))
 stopifnot(length(plot_genes) >= 2)
+heat_colors <- colorRampPalette(c("navy", "white", "firebrick3"))(50)
 
-save_png("Fig1A_DEG_heatmap.png", {
+save_png("DEG heatmap.png", {
   pheatmap(exprSet[plot_genes, ],
            scale = "row",
+           color = heat_colors,
            annotation_col = annotation_col,
+           border_color = NA,
            show_rownames = FALSE,
            show_colnames = TRUE,
-           main = "Figure 1A. DEG heatmap (|logFC|>2, P<0.05)")
+           main = "DEG heatmap (|logFC|>2, P<0.05)")
 }, width = 2000, height = 2400)
 
 
@@ -234,9 +233,9 @@ volcano <- ggplot(deg, aes(x = logFC, y = -log10(P.Value), color = threshold)) +
   geom_vline(xintercept = c(-2, 2), linetype = "dashed", color = "grey40") +
   geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey40") +
   theme_minimal(base_size = 12) +
-  labs(title = "Figure 1B. Volcano plot (AKI vs Control)",
+  labs(title = "Volcano plot (AKI vs Control)",
        x = "log2 Fold Change", y = "-log10(P value)", color = "Threshold")
-save_png("Fig1B_volcano.png", volcano, width = 2000, height = 1800)
+save_png("1b volcano.png", volcano, width = 2000, height = 1800)
 
 
 pca_res <- prcomp(t(exprSet), scale. = TRUE)
@@ -247,13 +246,13 @@ pca_plot <- ggplot(pca_df, aes(PC1, PC2, color = Group)) +
   stat_ellipse(level = 0.95, type = "t") +
   scale_color_manual(values = c("Control" = "#377EB8", "AKI" = "#E41A1C")) +
   theme_minimal(base_size = 12) +
-  labs(title = "Figure 1C. PCA (AKI vs Control)",
+  labs(title = "PCA (AKI vs Control)",
        x = sprintf("PC1 (%.1f%%)", var_explained[1]),
        y = sprintf("PC2 (%.1f%%)", var_explained[2]))
-save_png("Fig1C_PCA.png", pca_plot, width = 1800, height = 1500)
+save_png("1c PCA.png", pca_plot, width = 1800, height = 1500)
 
 
-save_png("Fig1D_UpVsDown_Venn.png", {
+save_png("1D UpVsDown Venn.png", {
   grid.newpage()
   venn.plot <- draw.pairwise.venn(
     area1     = nrow(deg_up),
@@ -270,7 +269,7 @@ save_png("Fig1D_UpVsDown_Venn.png", {
 }, width = 1500, height = 1500)
 
 
-# 9. Probe to gene symbol mapping 
+# Probe to gene symbol mapping 
 probe_ids_all <- rownames(deg)
 sym_all <- mapIds(ragene11sttranscriptcluster.db,
                   keys  = probe_ids_all,
@@ -291,7 +290,7 @@ deg_up_anno$GeneSymbol <- mapIds(ragene11sttranscriptcluster.db,
 deg_up_anno_clean <- deg_up_anno[!is.na(deg_up_anno$GeneSymbol) &
                                    deg_up_anno$GeneSymbol != "", ]
 write.csv(deg_up_anno_clean,
-          file.path(results_dir, "Upregulated_DEGs_for_STRING.csv"),
+          file.path(results_dir, "Upregulated DEGs for STRING.csv"),
           row.names = FALSE)
 
 up_genes <- data.frame(
@@ -302,7 +301,7 @@ up_genes <- data.frame(
   adj.P.Val  = deg_up_anno$adj.P.Val     
 )
 write.csv(up_genes,
-          file.path(results_dir, "Upregulated_genes_with_probes.csv"),
+          file.path(results_dir, "Upregulated genes with probes.csv"),
           row.names = FALSE)
 
 
@@ -317,20 +316,20 @@ top_anno <- data.frame(
                   keys = top_genes, column = "SYMBOL",
                   keytype = "PROBEID", multiVals = "first")
 )
-save_png("Fig2_top50_heatmap.png", {
+save_png("2 top50 heatmap.png", {
   pheatmap(exprSet[top_genes, ],
            scale = "row",
+           color = heat_colors,
            annotation_col = annotation_col,
            labels_row = ifelse(is.na(top_anno$Symbol), top_anno$ProbeID,
                                top_anno$Symbol),
            show_rownames = TRUE,
            show_colnames = TRUE,
-           main = "Figure 2. Top-50 DEG heatmap")
+           main = "Top 50 DEG heatmap")
 }, width = 2000, height = 2400)
 
 
-
-# 11. GSEA Reviewer 2 Q1
+# GSEA 
 rank_list <- deg$t
 names(rank_list) <- deg$GeneSymbol
 rank_list <- sort(rank_list[!is.na(names(rank_list))], decreasing = TRUE)
@@ -351,18 +350,12 @@ rank_entrez <- rank_entrez[o]
 rank_entrez <- rank_entrez[!duplicated(names(rank_entrez))] 
 rank_entrez <- rank_entrez[order(-rank_entrez, names(rank_entrez))] 
 
-cat(sprintf("[GSEA] versions -> DOSE %s | clusterProfiler %s | ReactomePA %s | fgsea %s\n",
+cat(sprintf("versions -> DOSE %s | clusterProfiler %s | ReactomePA %s | fgsea %s\n",
             as.character(packageVersion("DOSE")),
             as.character(packageVersion("clusterProfiler")),
             as.character(packageVersion("ReactomePA")),
             tryCatch(as.character(packageVersion("fgsea")),
                      error = function(e) "not installed")))
-cat("[GSEA] NOTE: on the gson/enrichit-based Bioconductor stack (2026+),\n",
-    "      gseKEGG()/gsePathway() no longer expose an 'eps' argument. The\n",
-    "      'P-values are less than 1e-10' notice is then EXPECTED and harmless:\n",
-    "      it flags only pathways whose multilevel p-value estimate hit the\n",
-    "      1e-10 floor (i.e., the strongest hits). On older stacks eps=0 is\n",
-    "      applied automatically via the formals() checks below.\n")
 
 gsea_muffle_warnings <- function(expr, label) {
   n_ties <- 0L
@@ -380,9 +373,8 @@ gsea_muffle_warnings <- function(expr, label) {
       }
     })
   if (n_ties > 0L || n_eps > 0L)
-    message(sprintf(paste0("[GSEA] %s: muffled %d benign fgsea notice(s) ",
-                           "(%d tie-ordering, %d p<1e-10 floor); see the ",
-                           "version banner above for why this is expected."),
+    message(sprintf(paste0("%s: muffled %d benign fgsea notice(s) ",
+                           "(%d tie-ordering, %d p<1e-10 floor); this is expected."),
                     label, n_ties + n_eps, n_ties, n_eps))
   res
 }
@@ -401,9 +393,7 @@ fmls <- names(formals(clusterProfiler::gseKEGG))
 if ("eps"  %in% fmls) gsea_args$eps  <- 0   
 if ("seed" %in% fmls) gsea_args$seed <- TRUE
 if (!("eps" %in% fmls))
-  message("[GSEA] clusterProfiler has no 'eps' formal (expected on the ",
-          "gson/enrichit stack) -> the p<1e-10 notice cannot be suppressed ",
-          "via arguments; it is harmless (see version banner above).")
+  message("clusterProfiler has no 'eps' formal; it is harmless.")
 
 set.seed(42)
 
@@ -419,26 +409,30 @@ for (kegg_att in 1:3) {
       NULL })
   if (!is.null(gsea_kegg)) break
   if (kegg_att < 3) {
-    message("  retrying in 30 s (rest.kegg.jp can be slow or unreachable)...")
+    message("  retrying in 30s")
     Sys.sleep(30)
   }
 }
 options(timeout = old_timeout)
 if (is.null(gsea_kegg))
-  message("[KEGG] KEGG GSEA skipped after 3 failed attempts (see the exact ",
-          "error messages above for the cause -- connectivity, blocked rest.kegg.jp, ",
-          "or an argument mismatch on this package version). ",
-          "All other pipeline sections are unaffected.")
+  message("KEGG GSEA skipped after 3 failed attempts")
 
 if (!is.null(gsea_kegg) && nrow(gsea_kegg) > 0) {
-  save_png("Fig_GSEA_KEGG_dotplot.png", {
-    print(dotplot(gsea_kegg, showCategory = 20,
-                  title = "GSEA — KEGG pathways (AKI vs Control)"))
+  save_png("GSEA KEGG dotplot.png", {
+    print(
+      dotplot(gsea_kegg, showCategory = 20, title = "GSEA KEGG pathways (AKI vs Control)") +
+        scale_color_viridis_c(guide = guide_colorbar(reverse = TRUE)) +
+        theme_bw(base_size = 13) +
+        theme(axis.text.y = element_text(size = 11, lineheight = 0.8),
+              panel.grid.minor = element_blank())
+    )
   }, width = 2000, height = 1800)
+  
   write.csv(as.data.frame(gsea_kegg),
-            file.path(results_dir, "GSEA_KEGG_results.csv"),
+            file.path(results_dir, "GSEA KEGG results.csv"),
             row.names = FALSE)
 }
+
 
 
 react_args <- list(geneList      = rank_entrez,
@@ -453,24 +447,30 @@ fmls_r <- names(formals(ReactomePA::gsePathway))
 if ("eps"  %in% fmls_r) react_args$eps  <- 0  
 if ("seed" %in% fmls_r) react_args$seed <- TRUE
 if (!("eps" %in% fmls_r))
-  message("[GSEA] ReactomePA has no 'eps' formal (expected on the ",
-          "gson/enrichit stack) -> the p<1e-10 notice is harmless.")
+  message("ReactomePA has no 'eps' formal and its harmless.")
 set.seed(42)
 gsea_react <- tryCatch(
   gsea_muffle_warnings(do.call(ReactomePA::gsePathway, react_args), "Reactome"),
   error = function(e) { message("Reactome GSEA failed: ", e$message); NULL })
 if (!is.null(gsea_react) && nrow(gsea_react) > 0) {
-  save_png("Fig_GSEA_Reactome_dotplot.png", {
-    print(dotplot(gsea_react, showCategory = 20,
-                  title = "GSEA — Reactome pathways (AKI vs Control)"))
-  }, width = 2000, height = 1800)
+  save_png("GSEA Reactome dotplot.png", {
+    print(
+      dotplot(gsea_react, showCategory = 20, title = "GSEA - Reactome pathways (AKI vs Control)") +
+        scale_color_viridis_c(guide = guide_colorbar(reverse = TRUE)) +
+        scale_y_discrete(labels = function(x) str_wrap(x, width = 45)) + 
+        theme_bw(base_size = 13) +
+        theme(axis.text.y = element_text(size = 7, lineheight = 0.75),  
+              panel.grid.minor = element_blank(),
+              plot.title = element_text(hjust = 0.5))
+    )
+  }, width = 2000, height = 1800) 
+  
   write.csv(as.data.frame(gsea_react),
-            file.path(results_dir, "GSEA_Reactome_results.csv"),
+            file.path(results_dir, "GSEA Reactome results.csv"),
             row.names = FALSE)
 }
 
-
-# 12. PPI network via STRINGdb (Reviewer 2 Q2
+# PPI network via STRINGdb 
 suppressPackageStartupMessages({
   library(httr); library(igraph); library(dplyr); library(tidyr); library(tibble)
   library(pheatmap); library(pROC)
@@ -522,7 +522,7 @@ fetch_string_rest <- function(ids, species = 10116, score = 400, chunk = 250) {
   for (start in seq(1, length(ids), by = chunk)) {
     end   <- min(start + chunk - 1, length(ids))
     batch <- ids[start:end]
-    cat(sprintf("  [REST] ids %d-%d / %d\n", start, end, length(ids)))
+    cat(sprintf("ids %d-%d / %d\n", start, end, length(ids)))
     resp <- tryCatch(
       httr::POST("https://string-db.org/api/tsv/interaction-partners",
                  body = list(identifiers     = paste(batch, collapse = "\r\n"),
@@ -531,10 +531,10 @@ fetch_string_rest <- function(ids, species = 10116, score = 400, chunk = 250) {
                              limit           = 1000,   
                              caller_identity = "rat_AKI_DEG_pipeline"),
                  encode = "form", httr::timeout(180)),
-      error = function(e) { message("  [REST] request failed: ", e$message); NULL })
+      error = function(e) { message("request failed: ", e$message); NULL })
     if (is.null(resp)) next
     if (httr::status_code(resp) != 200) {
-      message("  [REST] HTTP ", httr::status_code(resp)); next
+      message("HTTP ", httr::status_code(resp)); next
     }
     txt <- httr::content(resp, as = "text", encoding = "UTF-8")
     df  <- tryCatch(read.delim(text = txt, header = TRUE, sep = "\t",
@@ -549,98 +549,7 @@ fetch_string_rest <- function(ids, species = 10116, score = 400, chunk = 250) {
   unique(do.call(rbind, out))
 }
 
-predict_venn <- function(mirdb_file, mirwalk_file, targetscan_file,
-                         out_csv, out_png) {
-  stopifnot(file.exists(mirdb_file), file.exists(mirwalk_file),
-            file.exists(targetscan_file))
-  mirdb      <- read.csv(mirdb_file,      stringsAsFactors = FALSE)$miRNA
-  mirwalk    <- read.csv(mirwalk_file,    stringsAsFactors = FALSE)$miRNA
-  targetscan <- read.csv(targetscan_file, stringsAsFactors = FALSE)$miRNA
-  v <- VennDiagram::venn.diagram(
-    x = list(miRDB = mirdb, miRWalk = mirwalk, TargetScan = targetscan),
-    filename = NULL, fill = c("#E41A1C", "#377EB8", "#4DAF4A"),
-    alpha = 0.5, cat.cex = 1.1, cex = 1.1, main = "miRNA 3-database overlap")
-  grDevices::png(out_png, width = 1800, height = 1500, res = 300)
-  grid::grid.draw(v); grDevices::dev.off()
-  common <- Reduce(intersect, list(mirdb, mirwalk, targetscan))
-  utils::write.csv(data.frame(miRNA = common), out_csv, row.names = FALSE)
-  message(sprintf("Saved: %s ; common miRNAs: %d", out_png, length(common)))
-  invisible(common)
-}
-
-run_mirna_mrna_spearman <- function(ct_df, gene_cols, mirna_cols,
-                                    out_csv, out_png, min_n = 5) {
-  stopifnot(all(c(gene_cols, mirna_cols) %in% colnames(ct_df)))
-  grid_ <- expand.grid(Gene = gene_cols, miRNA = mirna_cols,
-                       stringsAsFactors = FALSE)
-  res <- do.call(rbind, lapply(seq_len(nrow(grid_)), function(i) {
-    g <- grid_$Gene[i]; m <- grid_$miRNA[i]
-    x <- suppressWarnings(as.numeric(ct_df[[g]]))
-    y <- suppressWarnings(as.numeric(ct_df[[m]]))
-    ok <- is.finite(x) & is.finite(y)
-    if (sum(ok) < min_n || length(unique(x[ok])) < 2 || length(unique(y[ok])) < 2) {
-      return(data.frame(Gene = g, miRNA = m, rho = NA_real_,
-                        p.value = NA_real_, n = sum(ok)))
-    }
-    ct <- suppressWarnings(stats::cor.test(x[ok], y[ok],
-                                           method = "spearman", exact = FALSE))
-    data.frame(Gene = g, miRNA = m, rho = unname(ct$estimate),
-               p.value = ct$p.value, n = sum(ok))
-  }))
-  res$adj.p.value <- stats::p.adjust(res$p.value, method = "BH")
-  utils::write.csv(res, out_csv, row.names = FALSE)
-  
-  mat <- as.matrix(tibble::column_to_rownames(
-    tidyr::pivot_wider(res, names_from = miRNA, values_from = rho), "Gene"))
-  if (nrow(mat) >= 2 && ncol(mat) >= 2) {
-    grDevices::png(out_png, width = 2000, height = 1500, res = 300)
-    pheatmap::pheatmap(mat, cluster_rows = TRUE, cluster_cols = TRUE,
-                       color = grDevices::colorRampPalette(
-                         c("#377EB8", "white", "#E41A1C"))(50),
-                       main = "Spearman correlation: mRNA vs miRNA")
-    grDevices::dev.off()
-    message("Saved: ", out_png)
-  } else message("Heatmap skipped (need >=2 genes and >=2 miRNAs).")
-  invisible(res)
-}
-
-# Reviewer 2 Q5
-exploratory_roc <- function(df, marker, group_levels = c("Sham", "IRI")) {
-  stopifnot(marker %in% colnames(df), "group" %in% colnames(df))
-  d <- df[, c("group", marker)]
-  x <- suppressWarnings(as.numeric(d[[marker]]))
-  d <- d[is.finite(x), , drop = FALSE]
-  d$pred <- x[is.finite(x)]
-  d$grp  <- factor(d$group, levels = group_levels)
-  d <- d[!is.na(d$grp), , drop = FALSE]
-  tab <- table(d$grp)
-  if (any(tab < 2))
-    stop("Need >=2 samples per group (got ",
-         paste(names(tab), as.integer(tab), sep = "=", collapse = ", "), ")")
-  roc_obj <- pROC::roc(response = d$grp, predictor = d$pred,
-                       levels = group_levels, direction = "<", quiet = TRUE)
-  ci_obj <- as.numeric(pROC::ci.auc(roc_obj, conf.level = 0.95))
-  best <- as.data.frame(pROC::coords(roc_obj, "best",
-                                     ret = c("threshold", "sensitivity", "specificity"),
-                                     transpose = FALSE))
-  spec   <- best$specificity[1]
-  lr_pos <- if (is.finite(spec) && spec < 1) best$sensitivity[1] / (1 - spec) else Inf
-  x0 <- d$pred[d$grp == group_levels[1]]  
-  x1 <- d$pred[d$grp == group_levels[2]] 
-
-  p_mw <- tryCatch(stats::wilcox.test(x1, x0, exact = FALSE)$p.value,
-                   error = function(e) NA_real_)
-  data.frame(marker = marker, n = nrow(d),
-             n_controls = length(x0), n_cases = length(x1),
-             AUC = as.numeric(roc_obj$auc),
-             AUC_lower95 = ci_obj[1], AUC_upper95 = ci_obj[3],
-             p_value = p_mw, cutoff = best$threshold[1],
-             sensitivity = best$sensitivity[1], specificity = spec,
-             LR_plus = lr_pos, stringsAsFactors = FALSE)
-}
-
-
-#12a. Initialize STRINGdb 
+#Initialize STRINGdb 
 init_string_db <- function(species = 10116, score_threshold = 400, cache_dir) {
   dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
   for (v in c("12.0", "12", "11.5", "11.0")) {
@@ -652,44 +561,44 @@ init_string_db <- function(species = 10116, score_threshold = 400, cache_dir) {
         message("  [STRING] version ", v, " unavailable (", conditionMessage(e), ")")
         NULL
       })
-    if (!is.null(db)) { message("[STRING] Using STRINGdb v", v); return(db) }
+    if (!is.null(db)) { message("Using STRINGdb v", v); return(db) }
   }
-  stop("[STRING] Could not initialise STRINGdb with any known version.")
+  stop("Could not initialise STRINGdb with any known version.")
 }
 string_db <- init_string_db(10116, 400, file.path(results_dir, "STRING_cache"))
 
 
-# 12b. Map upregulated gene symbols -> STRING_id
+# Map upregulated gene symbols -> STRING_id
 sym_all <- unique(na.omit(as.character(deg_up_anno_clean$GeneSymbol)))
 map_in  <- unique(deg_up_anno_clean[!is.na(deg_up_anno_clean$GeneSymbol),
                                     c("GeneSymbol", "logFC"), drop = FALSE])
 mapped <- string_db$map(map_in, "GeneSymbol", removeUnmappedRows = TRUE)
-write.csv(mapped, file.path(results_dir, "STRING_mapped_upregulated.csv"),
+write.csv(mapped, file.path(results_dir, "STRING mapped upregulated.csv"),
           row.names = FALSE)
 
 unmapped_syms <- setdiff(sym_all, mapped$GeneSymbol)
 write.csv(data.frame(GeneSymbol = unmapped_syms),
-          file.path(results_dir, "STRING_unmapped_symbols.csv"), row.names = FALSE)
+          file.path(results_dir, "STRING unmapped symbols.csv"), row.names = FALSE)
 
-# 12c. Diagnostics 
+# Diagnostics 
 n_submitted <- length(sym_all)
 n_mapped    <- length(unique(na.omit(mapped$STRING_id)))
-cat(sprintf("[STRING] Submitted symbols : %d\n", n_submitted))
-cat(sprintf("[STRING] Mapped to STRING_id: %d (%.1f%%)\n",
+cat(sprintf("Submitted symbols : %d\n", n_submitted))
+cat(sprintf("Mapped to STRING_id: %d (%.1f%%)\n",
             n_mapped, 100 * n_mapped / max(n_submitted, 1)))
 if (n_mapped / max(n_submitted, 1) < 0.5)
-  warning("[STRING] <50% mapping rate — check species taxid / identifier type.")
+  warning("<50% mapping rate")
 print(head(mapped$STRING_id, 5))
 
 string_ids <- unique(mapped$STRING_id[!is.na(mapped$STRING_id) &
                                         nzchar(mapped$STRING_id)])
 stopifnot(length(string_ids) > 0)
-cat(sprintf("[STRING] Unique STRING_ids to query: %d\n", length(string_ids)))
+cat(sprintf("Unique STRING_ids to query: %d\n", length(string_ids)))
 
-# 12d. Chunked STRINGdb query
+# Chunked STRINGdb query
 chunk_size <- 50
 chunks <- split(string_ids, ceiling(seq_along(string_ids) / chunk_size))
-cat(sprintf("[STRING] Querying interactions in %d chunks (~%d ids/chunk)...\n",
+cat(sprintf("Querying interactions in %d chunks\n",
             length(chunks), chunk_size))
 string_edges_list <- list()
 for (i in seq_along(chunks)) {
@@ -704,27 +613,26 @@ for (i in seq_along(chunks)) {
 string_edges_stringdb <- if (length(string_edges_list))
   unique(do.call(rbind, string_edges_list)) else NULL
 
-#12e/f. Choose source, normalize, 12g. filter within input set + dedup
+# Choose source, normalize,filter within input set + dedup
 raw_edges <- if (is.null(string_edges_stringdb) || nrow(string_edges_stringdb) == 0) {
-  message("[STRING] STRINGdb returned no edges -> REST POST fallback.")
+  message("STRINGdb returned no edges -> REST POST fallback.")
   fetch_string_rest(string_ids)
 } else string_edges_stringdb
 if (is.null(raw_edges) || nrow(raw_edges) == 0)
-  stop("[STRING] No interactions from STRINGdb or REST. ",
-       "Check internet access / STRING service status.")
+  stop("No interactions from STRINGdb or REST. ")
 
 string_edges_raw <- normalize_string_edges(raw_edges)
 string_edges     <- dedup_undirected(filter_within(string_edges_raw, string_ids))
-cat(sprintf("[STRING] Raw edges: %d | normalized: %d | between input proteins: %d\n",
+cat(sprintf("Raw edges: %d | normalized: %d | between input proteins: %d\n",
             nrow(raw_edges), nrow(string_edges_raw), nrow(string_edges)))
 covered <- unique(c(string_edges$from, string_edges$to))
-cat(sprintf("[STRING] Coverage: %d / %d input proteins in >=1 edge\n",
+cat(sprintf("Coverage: %d / %d input proteins in >=1 edge\n",
             length(covered), length(string_ids)))
 write.csv(string_edges,
-          file.path(results_dir, "STRING_edge_list_upregulated.csv"),
+          file.path(results_dir, "STRING edge list upregulated.csv"),
           row.names = FALSE)
 
-# 12h. igraph + centralities
+# igraph + centralities
 
 stopifnot(nrow(string_edges) >= 2)
 
@@ -735,7 +643,7 @@ igraph::V(g)$STRING_id <- igraph::V(g)$name
 id2sym <- setNames(mapped$GeneSymbol, mapped$STRING_id)
 igraph::V(g)$name <- ifelse(igraph::V(g)$name %in% names(id2sym),
                             id2sym[igraph::V(g)$name], igraph::V(g)$name)
-cat(sprintf("[STRING] igraph: %d vertices, %d edges\n",
+cat(sprintf("igraph: %d vertices, %d edges\n",
             igraph::vcount(g), igraph::ecount(g)))
 
 centralities <- data.frame(
@@ -751,37 +659,48 @@ centralities <- centralities[order(-centralities$Degree,
                                    centralities$Gene), ]
 rownames(centralities) <- NULL
 write.csv(centralities,
-          file.path(results_dir, "hub_gene_centrality_metrics.csv"),
+          file.path(results_dir, "hub gene centrality metrics.csv"),
           row.names = FALSE)
 
 hub90 <- head(centralities$Gene, min(90, nrow(centralities)))
 hub10 <- head(centralities$Gene, min(10, nrow(centralities)))
-writeLines(hub90, file.path(results_dir, "hub_genes_90.txt"))
-writeLines(hub10, file.path(results_dir, "hub_genes_10.txt"))
+writeLines(hub90, file.path(results_dir, "hub genes 90.txt"))
+writeLines(hub10, file.path(results_dir, "hub genes 10.txt"))
 
-# 13. Hub-gene supplementary figures (unchanged logic, package-safe)
+# Hub-gene supplementary
 
 plot_top_n_bar <- function(metric, n, fill_col) {
   df <- centralities %>%
     arrange(desc(.data[[metric]])) %>%
     slice_head(n = n) %>%
     mutate(Gene = factor(Gene, levels = rev(Gene)))
+  
   ggplot(df, aes(x = .data[[metric]], y = Gene)) +
-    geom_col(fill = fill_col, color = "black", width = 0.7) +
-    theme_minimal(base_size = 11) +
+    geom_col(fill = fill_col, color = NA, width = 0.75) +
+    geom_text(aes(label = round(.data[[metric]], 2)), 
+              hjust = -0.1, size = 3.5, color = "grey30") +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.15))) +
+    theme_classic(base_size = 12) +
+    theme(axis.line.y = element_blank(),
+          axis.ticks.y = element_blank()) +
     labs(title = sprintf("Top-%d hub genes by %s", n, metric),
          x = metric, y = NULL)
 }
+
 metric_cols <- c(Degree = "#E41A1C", Betweenness = "#377EB8",
                  Closeness = "#4DAF4A", Eigenvector = "#984EA3")
-for (m in names(metric_cols))
-  for (n in c(20, 30))
-    save_png(sprintf("HubFig_top%d_%s.png", n, m),
+
+for (m in names(metric_cols)) {
+  for (n in c(20, 30)) {
+    save_png(sprintf("Hub top%d %s.png", n, m),
              plot_top_n_bar(m, n, metric_cols[[m]]),
              width = 1800, height = 1500)
+  }
+}
 
 
-# 14. Hub-of-hub refinement
+
+# Hub-of-hub refinement
 
 if (!requireNamespace("VennDiagram", quietly = TRUE))
   BiocManager::install("VennDiagram")
@@ -794,14 +713,14 @@ hub10_mapped <- string_db$map(data.frame(GeneSymbol = hub10,
                               "GeneSymbol", removeUnmappedRows = TRUE)
 miss <- setdiff(hub10, hub10_mapped$GeneSymbol)
 if (length(miss))
-  message("[STRING] Hub genes not mapped: ", paste(miss, collapse = ", "))
+  message("Hub genes not mapped: ", paste(miss, collapse = ", "))
 hub10_ids <- unique(hub10_mapped$STRING_id)
 raw10 <- tryCatch(string_db$get_interactions(hub10_ids), error = function(e) NULL)
 if (is.null(raw10) || nrow(raw10) == 0)
   raw10 <- fetch_string_rest(hub10_ids, chunk = max(length(hub10_ids), 1))
 
 if (is.null(raw10)) {
-  message("[STRING] No interactions among the 10 hubs; writing empty table.")
+  message("No interactions among the 10 hubs; writing empty table.")
   hub10_edges <- data.frame(from = character(), to = character(),
                             combined_score = numeric(),
                             from_symbol = character(), to_symbol = character())
@@ -812,18 +731,17 @@ if (is.null(raw10)) {
   hub10_edges$from_symbol <- unname(id2sym10[hub10_edges$from])
   hub10_edges$to_symbol   <- unname(id2sym10[hub10_edges$to])
 }
-write.csv(hub10_edges, file.path(results_dir, "STRING_edge_list_hub10.csv"),
+write.csv(hub10_edges, file.path(results_dir, "STRING edge list hub10.csv"),
           row.names = FALSE)
-cat(sprintf("[STRING] Hub-10 internal edges: %d\n", nrow(hub10_edges)))
+cat(sprintf("Hub 10 internal edges: %d\n", nrow(hub10_edges)))
 
 hub6 <- c("BRCA1", "RAD51", "MCM7", "EXO1", "RFC3", "TP53")
-writeLines(hub6, file.path(results_dir, "hub_genes_6_validated.txt"))
+writeLines(hub6, file.path(results_dir, "hub genes 6 validated.txt"))
 
 
 
 
-
-# 17. Independent validation: GSE9943 (Reviewer 1 Q1)
+# Independent validation: GSE9943 
 gse9943_map <- c(
   GSM251560 = "BN|Control", GSM251561 = "SD|Control",
   GSM251586 = "BN|Control", GSM251588 = "SD|Control",
@@ -848,7 +766,7 @@ infer_group_9943 <- function(gsm, title) {
     if (is.na(out[1])) out[1] <- hv[1]
     if (is.na(out[2])) out[2] <- hv[2]
     if (!identical(out, hv))
-      message(sprintf("[GSE9943] %s: title infers %s/%s but map says %s/%s -> keeping map",
+      message(sprintf("GSE9943 %s: title infers %s/%s but map says %s/%s -> keeping map",
                       gsm, out[1], out[2], hv[1], hv[2]))
   }
   out
@@ -867,8 +785,8 @@ tryCatch(local({
   expr_val  <- Biobase::exprs(eset_val)
   stopifnot(ncol(expr_val) == nrow(pheno_val))
 
-  ## Reviewer 2 traceability
-  write.csv(pheno_val, file.path(results_dir, "GSE9943_pData_full.csv"),
+  ## traceability
+  write.csv(pheno_val, file.path(results_dir, "GSE9943 pData full.csv"),
             row.names = TRUE)
 
   gsm_ids <- sampleNames(eset_val)
@@ -882,16 +800,16 @@ tryCatch(local({
   val_table <- data.frame(GSM = gsm_ids, Title = titles,
                           Strain = unname(strains), Group = unname(grps),
                           stringsAsFactors = FALSE)
-  write.csv(val_table, file.path(results_dir, "GSE9943_group_assignment.csv"),
+  write.csv(val_table, file.path(results_dir, "GSE9943 group assignment.csv"),
             row.names = FALSE)
-  cat("[GSE9943] Group assignment (from Sample_title + GEO map):\n")
+  cat("Group assignment (from Sample_title + GEO map):\n")
   print(val_table)
 
   if (any(is.na(strains)) || any(is.na(grps)))
     stop("Unassigned strain/group for: ",
          paste(gsm_ids[is.na(strains) | is.na(grps)], collapse = ", "), call. = FALSE)
 
-  cat(sprintf("[GSE9943] SD: %d Control / %d IR | BN: %d Control / %d IR\n",
+  cat(sprintf("SD: %d Control / %d IR | BN: %d Control / %d IR\n",
               sum(strains == "SD" & grps == "Control"),
               sum(strains == "SD" & grps == "IR"),
               sum(strains == "BN" & grps == "Control"),
@@ -929,14 +847,14 @@ tryCatch(local({
       }
     }
   }
-  cat(sprintf("[GSE9943] probes with a gene symbol: %d / %d (%.1f%%)\n",
+  cat(sprintf("probes with a gene symbol: %d / %d (%.1f%%)\n",
               sum(!is.na(sym_lut)), length(sym_lut),
               100 * sum(!is.na(sym_lut)) / length(sym_lut)))
 
   sym_disc  <- setNames(deg$GeneSymbol, deg$ProbeID)
   disc_syms <- na.omit(unique(unname(sym_disc[rownames(deg_filtered)])))
   if (!length(disc_syms))
-    stop("Discovery DEG symbol list is empty; check Sections 3 and 9.", call. = FALSE)
+    stop("Discovery DEG symbol list is empty", call. = FALSE)
 
   ## Per-strain validation DEGs + overlap 
   val_summary <- list()
@@ -944,7 +862,7 @@ tryCatch(local({
     sel <- names(strains)[strains == st & grps %in% c("Control", "IR")]
     gst <- table(droplevels(factor(grps[sel])))
     if (length(sel) < 4 || min(gst) < 2) {
-      message("[GSE9943] strain ", st, ": insufficient replicates (", length(sel),
+      message("strain ", st, ": insufficient replicates (", length(sel),
               " samples); skipped."); next
     }
     g_st <- factor(grps[sel], levels = c("Control", "IR"))
@@ -961,9 +879,9 @@ tryCatch(local({
     dvf <- dv[abs(dv$logFC) > 2 & dv$P.Value < 0.05, , drop = FALSE]
     dvf$GeneSymbol <- unname(sym_lut[rownames(dvf)])
     write.csv(dv,  file.path(results_dir,
-               sprintf("GSE9943_%s_DEG_full.csv", st)), row.names = TRUE)
+               sprintf("GSE9943 %s DEG full.csv", st)), row.names = TRUE)
     write.csv(dvf, file.path(results_dir,
-               sprintf("GSE9943_%s_DEG_filtered.csv", st)), row.names = TRUE)
+               sprintf("GSE9943 %s DEG filtered.csv", st)), row.names = TRUE)
 
     vs <- na.omit(unique(dvf$GeneSymbol))
     ov <- intersect(disc_syms, vs)
@@ -973,23 +891,26 @@ tryCatch(local({
       overlap_with_GSE58438 = length(ov), stringsAsFactors = FALSE)
     write.csv(data.frame(Validated_gene = ov),
               file.path(results_dir,
-                sprintf("GSE58438_vs_GSE9943_%s_overlap.csv", st)),
+                sprintf("GSE58438 vs GSE9943 %s overlap.csv", st)),
               row.names = FALSE)
-    cat(sprintf("[validation/%s] discovery: %d | GSE9943-%s: %d symbols | overlap: %d\n",
+    cat(sprintf("validation/%s discovery: %d | GSE9943-%s: %d symbols | overlap: %d\n",
                 st, length(disc_syms), st, length(vs), length(ov)))
 
 
     if (st == val_strain && length(disc_syms) > 0 && length(vs) > 0) {
-      save_png("Fig_GSE9943_validation_venn.png", {
+      save_png("GSE9943 validation venn.png", {
         grid::grid.newpage()
         grid::grid.draw(draw.pairwise.venn(
           area1 = length(disc_syms), area2 = length(vs),
           cross.area = length(ov),
           category = c("GSE58438 (discovery)",
                        sprintf("GSE9943 %s (validation)", st)),
-          fill = c("#E41A1C", "#377EB8"), alpha = 0.5,
+          fill = c("#E41A1C", "#377EB8"), alpha = 0.6,
+          lty = "blank",
+          fontfamily = "sans",
+          cat.fontfamilty = "sans",
           cat.pos = c(-30, 30), cat.dist = c(0.05, 0.05),
-          cat.cex = 1.2, cex = 1.2))
+          cat.cex = 1.2, cex = 1.3))
       }, width = 1800, height = 1500)
     }
   }
@@ -997,17 +918,17 @@ tryCatch(local({
   if (length(val_summary)) {
     val_sum_df <- do.call(rbind, val_summary)
     write.csv(val_sum_df,
-              file.path(results_dir, "GSE9943_validation_summary.csv"),
+              file.path(results_dir, "GSE9943 validation summary.csv"),
               row.names = FALSE)
     print(val_sum_df)
   }
 }), error = function(e) {
-  message("[GSE9943] Validation section failed (pipeline continues): ",
+  message("Validation section failed (pipeline continues): ",
           conditionMessage(e))
 })
 
 
-# 18. WGCNA module discovery
+# WGCNA module discovery
 
 suppressPackageStartupMessages(library(WGCNA))
 enableWGCNAThreads()
@@ -1017,8 +938,7 @@ cor   <- WGCNA::cor
 bicor <- WGCNA::bicor  
 
 if (!all(c("weights.x", "weights.y", "cosine") %in% names(formals(cor))))
-  message("[WGCNA] NOTE: WGCNA::cor formals look different than expected; ",
-          "the dispatch probe below will tell whether the fix is effective.")
+  message(" WGCNA::cor formals look different")
 
 
 probe_ok <- tryCatch({
@@ -1028,23 +948,18 @@ probe_ok <- tryCatch({
                          cosine = FALSE, use = "everything")))
   TRUE
 }, error = function(e) {
-  message("[WGCNA] WARNING: cor dispatch probe FAILED: ", e$message)
-  message("[WGCNA] If blockwiseModules later dies with 'unused arguments ",
-          "(weights.x ...', restart R and re-run this script (a clean session ",
-          "guarantees WGCNA's cor is in control), or update WGCNA via ",
-          "install.packages('WGCNA').")
+  message("cor dispatch probe FAILED")
   FALSE
 })
 if (probe_ok)
-  message("[WGCNA] cor dispatch probe OK -- WGCNA::cor handles the internal ",
-          "weights.x/weights.y/cosine arguments.")
+  message("cor dispatch probe OK")
 
 datExpr <- t(as.matrix(exprSet))
 if (is.null(rownames(datExpr)))
   rownames(datExpr) <- sprintf("S%02d", seq_len(nrow(datExpr)))
 gsg <- goodSamplesGenes(datExpr, verbose = 0)
 if (!gsg$allOK) {
-  cat(sprintf("[WGCNA] goodSamplesGenes removed %d samples / %d genes\n",
+  cat(sprintf("goodSamplesGenes removed %d samples / %d genes\n",
               sum(!gsg$goodSamples), sum(!gsg$goodGenes)))
   datExpr <- datExpr[gsg$goodSamples, gsg$goodGenes, drop = FALSE]
 }
@@ -1059,19 +974,19 @@ sft <- pickSoftThreshold(datExpr, powerVector = powers,
 chosen_power <- 6   
 r2_at_power <- sft$fitIndices$SFT.R.sq[sft$fitIndices$Power == chosen_power]
 if (!is.na(r2_at_power) && r2_at_power < 0.80)
-  message(sprintf("[WGCNA] NOTE: scale-free R^2 at power %d is %.2f (<0.80); ",
+  message(sprintf("scale-free R^2 at power %d is %.2f (<0.80); ",
                   chosen_power, r2_at_power),
-          "sft$powerEstimate = ", sft$powerEstimate,
-          " — consider reporting both.")
+          "sft$powerEstimate = ", sft$powerEstimate)
 
-save_png("WGCNA_soft_threshold.png", {
+save_png("WGCNA soft threshold.png", {
   par(mfrow = c(1, 2))
   plot(sft$fitIndices$Power, -sign(sft$fitIndices$slope) * sft$fitIndices$SFT.R.sq,
        xlab = "Soft Threshold (power)",
        ylab = "Scale Free Topology Model Fit (signed R^2)",
-       type = "n", main = "Soft-threshold selection")
+       type = "n", main = "Soft threshold selection")
   text(sft$fitIndices$Power, -sign(sft$fitIndices$slope) * sft$fitIndices$SFT.R.sq,
        labels = powers, col = "red")
+  abline(h = 0.85, col = "blue", lty = 2, lwd = 2)
   plot(sft$fitIndices$Power, sft$fitIndices$mean.k.,
        xlab = "Soft Threshold (power)", ylab = "Mean Connectivity",
        type = "l", main = "Mean connectivity decay")
@@ -1093,15 +1008,6 @@ colnames(MEs) <- paste0("ME", labels2colors(
   as.numeric(gsub("^ME", "", colnames(MEs)))))
 MEs <- orderMEs(as.data.frame(MEs))
 
-save_png("WGCNA_dendro_colors.png", {                    
-  n_blocks <- length(net$dendrograms)
-  par(mfrow = c(n_blocks, 1))
-  for (b in seq_len(n_blocks))
-    plotDendroAndColors(net$dendrograms[[b]], moduleColors[net$blockGenes[[b]]],
-                        "Module colors", dendroLabels = FALSE, hang = 0.03,
-                        addGuide = TRUE, guideHang = 0.05,
-                        main = sprintf("Block %d", b))
-}, width = (2200* 5), height = 800 * length(net$dendrograms) + 1200)
 
 trait_mat <- matrix(trait, ncol = 1, dimnames = list(NULL, "AKI_vs_Control"))
 moduleTraitCor    <- cor(as.matrix(MEs), trait_mat, use = "p")
@@ -1110,14 +1016,14 @@ textMat <- paste(signif(moduleTraitCor, 2), "\n(",
                  signif(moduleTraitPvalue, 1), ")", sep = "")
 dim(textMat) <- dim(moduleTraitCor)
 
-save_png("WGCNA_module_trait_heatmap.png", {
+save_png("WGCNA module trait heatmap.png", {
   par(mar = c(4, 8, 2, 1))
   labeledHeatmap(Matrix = moduleTraitCor, xLabels = colnames(trait_mat),
                  yLabels = rownames(moduleTraitCor),
                  ySymbols = rownames(moduleTraitCor), colorLabels = FALSE,
                  colors = blueWhiteRed(50), textMatrix = textMat,
                  setStdMargins = TRUE, cex.text = 0.8,
-                 main = "Module-trait relationships")
+                 main = "Module trait relationships")
 }, width = 5600, height = 8000)
 
 module_of_interest <- "blue"
@@ -1130,12 +1036,15 @@ if (sum(moduleGenes) > 0 && me_col %in% colnames(MEs)) {
   hubGenes <- colnames(datExpr)[moduleGenes][order(-kME_blue)][seq_len(n_hub)]
   writeLines(hubGenes, file.path(results_dir, "WGCNA_blue_hub10.txt"))
   cat("Top WGCNA blue-module hub genes (probe IDs):\n"); print(hubGenes)
-} else message("[WGCNA] Module 'blue' absent in this dataset; skipped.")
+} else message("Module 'blue' absent in this dataset; skipped.")
 
 
 
 
-# 20. Session info + artifact manifest
+
+
+
+# Session info + artifact manifest
 writeLines(capture.output(sessionInfo()),
            file.path(results_dir, "sessionInfo.txt"))
 manifest <- list.files(out_dir, pattern = "\\.png$", full.names = FALSE)
